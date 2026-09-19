@@ -94,7 +94,7 @@ object Addon {
      */
     fun get(url: String, engine: String): List<Search.Result>? = runCatching {
         val req = Request.Builder().url(url).header("User-Agent", "VizPlay").build()
-        client.newCall(req).execute().use { resp ->
+        Net.call(client, req).use { resp ->
             if (!resp.isSuccessful) null else parseStreams(JSONObject(resp.body?.string() ?: "{}"), engine)
         }
     }.getOrNull()

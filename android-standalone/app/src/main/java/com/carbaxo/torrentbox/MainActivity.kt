@@ -2965,6 +2965,9 @@ fun DetailScreen(
     var detail by remember { mutableStateOf<Tmdb.Detail?>(null) }
     var sources by remember { mutableStateOf<List<Search.Result>>(emptyList()) }
     var status by remember { mutableStateOf("Cargando…") }
+    // ¿Lo de `status` es un problema y no un "Cargando…"? Los fallos de red se
+    // pintan en ámbar: en gris se confundían con la sinopsis y pasaban inadvertidos.
+    var statusWarn by remember { mutableStateOf(false) }
     var loadingSources by remember { mutableStateOf(false) }
 
     // Series: temporada/episodio seleccionados y lista de episodios
@@ -2982,7 +2985,7 @@ fun DetailScreen(
     LaunchedEffect(title.tmdbId) {
         Tmdb.detail(title.type, title.tmdbId) { d, _ ->
             onMain {
-                detail = d; status = ""
+                detail = d; status = ""; statusWarn = false
                 if (d != null && d.type == "series" && d.seasons.isNotEmpty()) selSeason = d.seasons.first().season
             }
         }
@@ -3008,6 +3011,9 @@ fun DetailScreen(
     // motor e idioma. La combinación se hace en el hilo principal (onMain).
     fun runSearch(label: String, season: Int? = null, episode: Int? = null) {
         loadingSources = true; sources = emptyList(); sourcesLabel = label
+        // Sin esto, el aviso de la búsqueda anterior seguía puesto aunque esta
+        // fuera bien: al recargar parecía que el fallo continuaba.
+        status = ""; statusWarn = false
         ctxSeason = season ?: -1; ctxEpisode = episode ?: -1
         val id = imdbId
         // Los addons buscan por IMDb id: hace falta tenerlo, y en series hace falta
@@ -3019,6 +3025,7 @@ fun DetailScreen(
                 loadingSources = false
                 status = if (id == null) "No se pudo identificar el título (sin IMDb id)"
                 else "Elige un episodio para ver sus enlaces"
+                statusWarn = id == null
                 return
             }
             // Sin IMDb id solo se puede mirar en tu cuenta, por nombre
@@ -3026,7 +3033,7 @@ fun DetailScreen(
                 onMain {
                     loadingSources = false
                     sources = Search.sortByEngineAndLang(l.orEmpty(), Prefs.languageOrder)
-                    if (sources.isEmpty()) status = e ?: "Sin fuentes"
+                    if (sources.isEmpty()) { status = e ?: "Sin fuentes"; statusWarn = e != null }
                 }
             }
             return
@@ -3049,7 +3056,11 @@ fun DetailScreen(
         val engineCount = 3
         val wantPacks = title.type == "series"
         var remaining = (if (wantPacks) engineCount * 2 else engineCount) + 1
-        var lastErr: String? = null
+        // Los fallos de TODOS los motores, no solo el del último en contestar:
+        // con `lastErr` se perdía el de Peerflix en cuanto fallaba Torrentio, y
+        // justo cuando falla la red fallan los dos a la vez. LinkedHashSet para
+        // no repetir el mismo mensaje dos veces (episodio y packs del mismo addon).
+        val errs = LinkedHashSet<String>()
         /**
          * Va PINTANDO los enlaces conforme contesta cada motor, en vez de esperar a
          * que hayan contestado todos.
@@ -3087,7 +3098,7 @@ fun DetailScreen(
         }
 
         fun part(list: List<Search.Result>?, err: String?) = onMain {
-            if (list != null) acc.addAll(relevantes(list)) else lastErr = err
+            if (list != null) acc.addAll(relevantes(list)) else err?.let { errs.add(it) }
             remaining--
             // Un mismo torrent puede venir de varios motores: se queda el que trae
             // mas seeders, pero recordando que lo dieron todos (asi sigue
@@ -3113,7 +3124,10 @@ fun DetailScreen(
             sources = Search.sortByEngineAndLang(byHash.values.toList(), Prefs.languageOrder)
             if (remaining <= 0) {
                 loadingSources = false
-                if (sources.isEmpty()) status = lastErr ?: "Sin fuentes"
+                if (sources.isEmpty()) {
+                    status = errs.joinToString("\n").ifBlank { "Sin fuentes" }
+                    statusWarn = errs.isNotEmpty()
+                }
             }
         }
         ExtraAddon.streams(title.type, id!!, season, episode) { l, e -> part(l, e) }
@@ -3197,7 +3211,11 @@ fun DetailScreen(
             style = MaterialTheme.typography.bodySmall, color = Muted
         )
         if (dt != null && dt.overview.isNotBlank()) Text(dt.overview, style = MaterialTheme.typography.bodyMedium)
-        if (status.isNotBlank()) Text(status, color = Muted, style = MaterialTheme.typography.bodySmall)
+        if (status.isNotBlank()) Text(
+            status,
+            color = if (statusWarn) WarnAmber else Muted,
+            style = MaterialTheme.typography.bodySmall
+        )
     }
 
     // Tráiler + favorito. En la tele van en columna bajo la carátula; en el móvil,

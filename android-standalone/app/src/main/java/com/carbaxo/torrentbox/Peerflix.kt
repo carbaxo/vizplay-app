@@ -58,7 +58,7 @@ object Peerflix {
             try {
                 val url = base() + Addon.streamPath(type, imdbId, season, episode)
                 val req = Request.Builder().url(url).header("User-Agent", "VizPlay").build()
-                Addon.client.newCall(req).execute().use { resp ->
+                Net.call(Addon.client, req).use { resp ->
                     if (!resp.isSuccessful) return@submit onResult(null, "Peerflix respondió ${resp.code}")
                     onResult(
                         Addon.parseStreams(JSONObject(resp.body?.string() ?: "{}"), Search.ENGINE_PEERFLIX),
@@ -66,7 +66,7 @@ object Peerflix {
                     )
                 }
             } catch (e: Throwable) {
-                onResult(null, e.message ?: "Error de red (Peerflix).")
+                onResult(null, Net.explain("Peerflix", base(), e))
             }
         }
     }

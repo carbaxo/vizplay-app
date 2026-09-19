@@ -108,7 +108,7 @@ object Torrentio {
             try {
                 onResult(fetch("$HOST/stream/$kind/$id.json"), null)
             } catch (e: Throwable) {
-                onResult(null, e.message ?: "Error de red (Torrentio).")
+                onResult(null, Net.explain("Torrentio", HOST, e))
             }
         }
     }
@@ -116,7 +116,7 @@ object Torrentio {
     /** Lee una respuesta de Torrentio y la convierte en resultados. */
     private fun fetch(url: String): List<Search.Result> {
         val req = Request.Builder().url(url).header("User-Agent", "TorrentBox").build()
-        client.newCall(req).execute().use { resp ->
+        Net.call(client, req).use { resp ->
             if (!resp.isSuccessful) throw RuntimeException("Torrentio respondió ${resp.code}")
             val body = resp.body?.string() ?: "{}"
             val arr = JSONObject(body).optJSONArray("streams")

@@ -64,7 +64,7 @@ object ExtraAddon {
             try {
                 val url = base() + Addon.streamPath(type, imdbId, season, episode)
                 val req = Request.Builder().url(url).header("User-Agent", "VizPlay").build()
-                Addon.client.newCall(req).execute().use { resp ->
+                Net.call(Addon.client, req).use { resp ->
                     if (!resp.isSuccessful) return@submit onResult(null, "El addon extra respondió ${resp.code}")
                     onResult(
                         Addon.parseStreams(JSONObject(resp.body?.string() ?: "{}"), Search.ENGINE_EXTRA),
@@ -72,7 +72,7 @@ object ExtraAddon {
                     )
                 }
             } catch (e: Throwable) {
-                onResult(null, e.message ?: "Error de red (addon extra).")
+                onResult(null, Net.explain("Addon extra", base(), e))
             }
         }
     }
@@ -90,7 +90,7 @@ object ExtraAddon {
             val url = base() + Addon.streamPath("movie", "tt0468569", null, null)
             val r = runCatching {
                 val req = Request.Builder().url(url).header("User-Agent", "VizPlay").build()
-                Addon.client.newCall(req).execute().use { resp ->
+                Net.call(Addon.client, req).use { resp ->
                     if (!resp.isSuccessful) return@runCatching "El addon respondió ${resp.code}. Revisa la URL."
                     val n = Addon.parseStreams(
                         JSONObject(resp.body?.string() ?: "{}"), Search.ENGINE_EXTRA
@@ -99,7 +99,7 @@ object ExtraAddon {
                     else "Responde, pero sin enlaces. Puede que necesite una URL con tu configuración dentro."
                 }
             }
-            onResult(r.getOrElse { "No se pudo conectar: ${it.message ?: "error de red"}" })
+            onResult(r.getOrElse { Net.explain("No se pudo conectar", base(), it) })
         }
     }
 }
