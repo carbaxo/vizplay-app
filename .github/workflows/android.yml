@@ -6,8 +6,14 @@ name: Build Android APK
 on:
   push:
     # Una sola rama publica el APK en la Release android-latest: si compilan
-    # varias, la última en terminar sobrescribe el APK de las demás.
-    branches: [main, master, claude/torrent-downloader-streaming-cqjddi]
+    # varias, la última en terminar sobrescribe el APK de las demás. Si hay dos
+    # ramas de trabajo a la vez, el APK de android-latest es el de la última que
+    # se haya empujado, no el de la que se esté mirando.
+    branches:
+      - main
+      - master
+      - claude/torrent-downloader-streaming-cqjddi
+      - claude/android-app-links-error-jcy54f
     paths:
       - 'android-standalone/**'
       - '.github/workflows/android.yml'
