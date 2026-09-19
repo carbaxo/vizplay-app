@@ -48,8 +48,14 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # Se piden los paquetes A MANO. Por defecto esta action instala "tools",
+      # que Google ya retiro del repositorio, y el paso muere con
+      # "Warning: Failed to find package 'tools'" antes de compilar nada.
+      # Estos tres son los que de verdad hace falta tener para el compileSdk 34.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
