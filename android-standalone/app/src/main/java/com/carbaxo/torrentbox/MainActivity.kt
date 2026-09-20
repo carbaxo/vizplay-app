@@ -2494,7 +2494,8 @@ fun SourcesSection(
     label: String,
     title: Tmdb.Title,
     ctx: android.content.Context,
-    buildCtx: () -> PlayCtx,
+    /** Contexto de reproducción para una (temporada, episodio); null = el de la ficha. */
+    buildCtx: (Int?, Int?) -> PlayCtx,
     onPlayUrl: (String, PlayCtx) -> Unit,
     onCastMagnet: (String, PlayCtx) -> Unit,
     onOpenDownloads: () -> Unit
@@ -2559,6 +2560,18 @@ fun SourcesSection(
     val cached = RealDebrid.cachedHashes
     val instant = shown.count { it.infoHash in cached }
 
+    /** Contexto del episodio que está abierto en la ficha. */
+    fun ctxNow(): PlayCtx = buildCtx(null, null)
+
+    /**
+     * Contexto de un enlace. Un capítulo sacado de un pack se apunta en SU
+     * episodio, no en el que esté abierto: el nombre del fichero lo dice.
+     */
+    fun ctxOf(r: Search.Result): PlayCtx {
+        val ep = if (r.fileLink != null) Search.episodeOf(r.name) else null
+        return (if (ep != null) buildCtx(ep.first, ep.second) else buildCtx(null, null)).withSource(r)
+    }
+
     // Estado de la ventana flotante "Cargando…" / "Preparando la descarga"
     var prep by remember { mutableStateOf<Prep?>(null) }
     // Capítulos de un pack, cuando hay que elegir uno
@@ -2577,6 +2590,27 @@ fun SourcesSection(
                 magnet = r.magnet
             )
         }
+        // Un capítulo sacado de un pack YA sabe cuál es su archivo. Pasar por el
+        // magnet aquí no solo sobra: devolvería el PRIMER vídeo del pack, o sea
+        // siempre el mismo capítulo.
+        val link = r.fileLink
+        if (link != null) {
+            RealDebrid.unrestrict(link) { url, fname, err ->
+                onMain {
+                    if (prep == null) return@onMain           // cancelado por el usuario
+                    if (url == null) {
+                        prep = prep?.copy(error = err ?: "No se pudo preparar el capítulo.")
+                        return@onMain
+                    }
+                    prep = null
+                    if (download) {
+                        RdDownloads.enqueue(ctx, url, fname ?: r.name, magnet = r.magnet)
+                        onOpenDownloads()
+                    } else onPlayUrl(url, ctxOf(r))
+                }
+            }
+            return
+        }
         RealDebrid.streamMagnet(r.magnet) { url, fname, err, progress ->
             onMain {
                 val cur = prep ?: return@onMain     // cancelado por el usuario
@@ -2586,7 +2620,7 @@ fun SourcesSection(
                         if (download) {
                             RdDownloads.enqueue(ctx, url, fname ?: title.title, magnet = r.magnet)
                             onOpenDownloads()
-                        } else onPlayUrl(url, buildCtx().withSource(r))
+                        } else onPlayUrl(url, ctxOf(r))
                     }
                     progress != null && attempt < 25 -> {
                         // Explicar QUÉ está pasando: no es que el archivo no exista,
@@ -2613,17 +2647,26 @@ fun SourcesSection(
         }
     }
 
-    /** Reproduce (o emite) el capítulo elegido dentro de un pack. */
+    /**
+     * Reproduce (o emite) el capítulo elegido dentro de un pack.
+     *
+     * El contexto sale del NOMBRE DEL FICHERO, no del episodio abierto en la
+     * ficha: eligiendo el 3x05 en un pack abierto desde el 3x03, el progreso y la
+     * marca de visto iban a parar al 3x03.
+     */
     fun playPackFile(f: RealDebrid.RdFile) {
         packList = null
-        prep = Prep(false, "Preparando ${f.name.substringAfterLast('/').take(40)}…")
+        val nombre = f.name.substringAfterLast('/')
+        prep = Prep(false, "Preparando ${nombre.take(40)}…")
+        val ep = Search.episodeOf(nombre)
+        val pctx = if (ep != null) buildCtx(ep.first, ep.second) else buildCtx(null, null)
         RealDebrid.unrestrict(f.link) { url, _, err ->
             onMain {
                 if (url == null) prep = prep?.copy(error = err ?: "No se pudo preparar el capítulo.")
                 else {
                     prep = null
-                    if (CastManager.connected && !Prefs.castWithVlc) CastManager.castUrl(url, buildCtx())
-                    else onPlayUrl(url, buildCtx())
+                    if (CastManager.connected && !Prefs.castWithVlc) CastManager.castUrl(url, pctx)
+                    else onPlayUrl(url, pctx)
                 }
             }
         }
@@ -2825,7 +2868,7 @@ fun SourcesSection(
                                         // Con TV conectada va directo a la TV; el
                                         // CastManager muestra el progreso y elige la
                                         // versión con audio compatible.
-                                        onCastMagnet(r.magnet, buildCtx().withSource(r))
+                                        onCastMagnet(r.magnet, ctxOf(r))
                                     } else {
                                         // Con "emitir con VLC" hace falta el enlace
                                         // resuelto, así que pasa por Real-Debrid igual
@@ -3089,7 +3132,7 @@ fun DetailScreen(
         fun relevantes(l: List<Search.Result>): List<Search.Result> {
             if (season == null || episode == null) return l
             return l.mapNotNull { r ->
-                when (Search.episodeFit("${'$'}{r.name} ${'$'}{r.info}", season, episode)) {
+                when (Search.episodeFit("${r.name} ${r.info}", season, episode)) {
                     Search.Fit.NO -> null
                     Search.Fit.PACK -> if (r.pack) r else r.copy(pack = true)
                     Search.Fit.OK -> r
@@ -3103,10 +3146,12 @@ fun DetailScreen(
             // Un mismo torrent puede venir de varios motores: se queda el que trae
             // mas seeders, pero recordando que lo dieron todos (asi sigue
             // apareciendo en las pestanas de cada uno).
+            // La clave es dedupKey y no el infoHash: los capítulos sacados de un
+            // mismo pack COMPARTEN infoHash, y con él se fundirían en uno solo.
             val byHash = LinkedHashMap<String, Search.Result>()
             for (r in acc) {
-                val prev = byHash[r.infoHash]
-                byHash[r.infoHash] = if (prev == null) r
+                val prev = byHash[r.dedupKey]
+                byHash[r.dedupKey] = if (prev == null) r
                 else (if (r.seeders > prev.seeders) r else prev).copy(
                     engine = Search.mergeEngines(prev.engine, r.engine),
                     // De cada campo se queda el que informa: un motor puede dar
@@ -3121,7 +3166,14 @@ fun DetailScreen(
                     pack = prev.pack || r.pack
                 )
             }
-            sources = Search.sortByEngineAndLang(byHash.values.toList(), Prefs.languageOrder)
+            // Un pack del que YA se han sacado los capítulos no se enseña además
+            // entero: sería el mismo torrent dos veces, una útil y otra pidiendo
+            // elegir capítulo a mano.
+            val repartidos = byHash.values.filter { it.fileLink != null }.map { it.infoHash }.toSet()
+            sources = Search.sortByEngineAndLang(
+                byHash.values.filterNot { it.fileLink == null && it.infoHash in repartidos },
+                Prefs.languageOrder
+            )
             if (remaining <= 0) {
                 loadingSources = false
                 if (sources.isEmpty()) {
@@ -3165,10 +3217,15 @@ fun DetailScreen(
     // Al cambiar de temporada se cierra lo que hubiera abierto.
     LaunchedEffect(selSeason) { expandedEpisode = -1 }
 
-    // Contexto para el reproductor (marcar visto + reanudar) según lo buscado
-    fun buildCtx(): PlayCtx {
-        val s = ctxSeason.takeIf { it > 0 }
-        val e = ctxEpisode.takeIf { it > 0 }
+    // Contexto para el reproductor (marcar visto + reanudar) según lo buscado.
+    //
+    // Acepta una temporada y un episodio CONCRETOS porque lo que se reproduce no
+    // siempre es el episodio que está abierto en la ficha: al sacar un capítulo de
+    // un pack, el bueno es el del fichero. Sin esto, ver el 3x05 desde un pack se
+    // apuntaba como visto en el 3x03, que era el que estaba abierto.
+    fun buildCtx(ovSeason: Int? = null, ovEpisode: Int? = null): PlayCtx {
+        val s = ovSeason ?: ctxSeason.takeIf { it > 0 }
+        val e = ovEpisode ?: ctxEpisode.takeIf { it > 0 }
         val key = if (title.type == "series" && s != null) "series:${title.tmdbId}:$s:${e ?: 1}" else "movie:${title.tmdbId}"
         val resumeMs = WatchStore.progressFor(key)?.let { if (!it.watched) (it.position * 1000).toLong() else 0L } ?: 0L
         return PlayCtx(
@@ -3298,7 +3355,7 @@ fun DetailScreen(
                     }
                     // Enlaces JUSTO debajo del episodio elegido
                     if (open) {
-                        SourcesSection(sources, loadingSources, sourcesLabel, title, ctx, { buildCtx() }, onPlayUrl, onCastMagnet, onOpenDownloads)
+                        SourcesSection(sources, loadingSources, sourcesLabel, title, ctx, { s, e -> buildCtx(s, e) }, onPlayUrl, onCastMagnet, onOpenDownloads)
                     }
                 }
             }
@@ -3317,7 +3374,7 @@ fun DetailScreen(
                         .padding(6.dp)
                 )
             }
-            SourcesSection(sources, loadingSources, sourcesLabel, title, ctx, { buildCtx() }, onPlayUrl, onCastMagnet, onOpenDownloads)
+            SourcesSection(sources, loadingSources, sourcesLabel, title, ctx, { s, e -> buildCtx(s, e) }, onPlayUrl, onCastMagnet, onOpenDownloads)
         }
     }
 

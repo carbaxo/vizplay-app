@@ -519,6 +519,18 @@ object RealDebrid {
         return out.sortedWith { a, b -> Search.naturalCompare(a.name, b.name) }
     }
 
+    /**
+     * Archivos de un torrent ya listo, **bloqueando** hasta tener la respuesta.
+     *
+     * Existe para [RdEngine], que necesita los archivos de varios packs a la vez
+     * para repartirlos por episodio y ya está en un hilo de trabajo. Con la
+     * versión de callback habría que encadenar una espera por pack.
+     *
+     * NO llamar desde el hilo principal.
+     */
+    fun filesOfBlocking(id: String): List<RdFile> =
+        runCatching { filesFrom(rd("GET", "/torrents/info/$id")) }.getOrDefault(emptyList())
+
     fun torrentFiles(id: String, onDone: (List<RdFile>?, String?) -> Unit) {
         io.submit {
             try {

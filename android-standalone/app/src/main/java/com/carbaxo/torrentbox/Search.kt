@@ -23,8 +23,24 @@ object Search {
          * Es un PACK (temporada o serie completa), no un episodio suelto. Al
          * pulsarlo hay que elegir capítulo dentro, no reproducir el primero.
          */
-        val pack: Boolean = false
+        val pack: Boolean = false,
+        /**
+         * Enlace DIRECTO de Real-Debrid a **un archivo concreto** dentro de un
+         * torrent. Lo ponen los capítulos sacados de un pack que ya está en la
+         * cuenta (ver [RdEngine]): con él, el capítulo se reproduce sin volver a
+         * pasar por el magnet, que devolvería siempre el primer vídeo del pack.
+         *
+         * Null = enlace normal, se resuelve por el magnet.
+         */
+        val fileLink: String? = null
     ) {
+        /**
+         * Clave para deduplicar. No vale el infoHash a secas: los capítulos
+         * sacados de un mismo pack lo COMPARTEN, y con él se fundirían todos en
+         * uno solo (quedaría un capítulo por pack, que es justo lo contrario de
+         * lo que se busca).
+         */
+        val dedupKey: String get() = if (fileLink != null) "$infoHash|$fileLink" else infoHash
         /** ¿Lo devolvió este motor? (un enlace puede venir de los dos). */
         fun fromEngine(e: String) = e == Search.ENGINE_ALL || engine.contains(e)
 
@@ -252,6 +268,21 @@ object Search {
         """\b(?:temporada|temp|season)\s*(\d{1,2})\b|\b(\d{1,2})\s*(?:temporada|temp)\b"""
     )
     private val SOLO_S = Regex("""\bs(\d{1,2})\b""")
+    /**
+     * RANGO de temporadas: "Temporada 1-5 Completa", "Temporadas 1 a 3", "Seasons 2-4".
+     *
+     * Hace falta porque [flat] convierte el guion en espacio, así que "Temporada
+     * 1-5" llega como "temporada 1 5" y ni SERIE_COMPLETA (que exige el separador)
+     * ni TEMPORADA (que lee solo el primer número) lo entienden: un pack de las
+     * cinco temporadas se daba por pack de la 1 y se escondía en todas las demás.
+     * Por eso el separador es opcional.
+     *
+     * Solo cuenta si el segundo número es MAYOR que el primero. Sin esa condición,
+     * "Temporada 5 01 al 13" se leería como el rango 5→1, que no existe.
+     */
+    private val TEMP_RANGO = Regex(
+        """\b(?:temporadas?|temps?|seasons?)\s*(\d{1,2})\s*(?:al|a|to|y|-)?\s*(\d{1,2})\b"""
+    )
     private val SERIE_COMPLETA = Regex(
         """serie completa|complete series|todas las temporadas|coleccion completa|complete collection|seasons?\s*\d+\s*(?:to|a|-)\s*\d+"""
     )
@@ -275,6 +306,7 @@ object Search {
      * Family Guy - 101 - Death Has A Shadow     1x01 OK    (sin forma reconocible: pasa)
      * Bluey Temporada 1 [Cap.104_106]           1x05 PACK  1x01 NO
      * Oliver y Benji Campeones 3 Temporada      3x04 PACK  1x04 NO
+     * Peaky Blinders Temporada 1-5 Completa     3x03 PACK  (rango de temporadas)
      * ```
      */
     fun episodeFit(name: String, season: Int, episode: Int): Fit {
@@ -313,7 +345,14 @@ object Search {
         // 3) Serie completa: sirve para cualquier episodio
         if (SERIE_COMPLETA.containsMatchIn(n)) return Fit.PACK
 
-        // 4) Solo temporada declarada, sin episodio: es un pack de esa temporada
+        // 4) Rango de temporadas: "Temporada 1-5 Completa" vale para las cinco
+        TEMP_RANGO.find(n)?.let { m ->
+            val desde = m.groupValues[1].toInt()
+            val hasta = m.groupValues[2].toInt()
+            if (hasta > desde) return if (season in desde..hasta) Fit.PACK else Fit.NO
+        }
+
+        // 5) Solo temporada declarada, sin episodio: es un pack de esa temporada
         val temps = (
             TEMPORADA.findAll(n).flatMap { m ->
                 m.groupValues.drop(1).filter { it.isNotBlank() }.map { it.toInt() }
@@ -321,8 +360,35 @@ object Search {
             ).distinct().toList()
         if (temps.isNotEmpty()) return if (temps.contains(season)) Fit.PACK else Fit.NO
 
-        // 5) Del nombre no se saca nada: no se esconde
+        // 6) Del nombre no se saca nada: no se esconde
         return Fit.OK
+    }
+
+    /**
+     * Temporada y episodio que declara un nombre, o null si no se puede saber.
+     *
+     * Se usa para colocar en su sitio cada archivo de un pack: el pack no dice a
+     * qué episodio corresponde cada fichero, pero el propio nombre del fichero
+     * casi siempre sí ("...S03E05...", "3x05", "Cap.305").
+     *
+     * Solo devuelve algo cuando el nombre apunta a UN episodio: si trae varias
+     * referencias (un pack que los lista) no hay un episodio al que asignarlo.
+     */
+    fun episodeOf(name: String): Pair<Int, Int>? {
+        val n = flat(name)
+        // Un rango es un pack entero, no un episodio
+        if (EP_RANGO.containsMatchIn(n)) return null
+        val vistos = LinkedHashSet<Pair<Int, Int>>()
+        EP_SxE.findAll(n).forEach { vistos.add(it.groupValues[1].toInt() to it.groupValues[2].toInt()) }
+        EP_NxN.findAll(n).forEach { vistos.add(it.groupValues[1].toInt() to it.groupValues[2].toInt()) }
+        EP_CAP.findAll(n).forEach { m ->
+            for (d in listOf(m.groupValues[1], m.groupValues[2])) {
+                if (d.isBlank()) continue
+                val s = if (d.length == 4) d.take(2).toInt() else d.take(1).toInt()
+                vistos.add(s to d.takeLast(2).toInt())
+            }
+        }
+        return vistos.singleOrNull()
     }
 
     /** Construye la query para un episodio concreto: "Título S01E02". */
