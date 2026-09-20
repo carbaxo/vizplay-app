@@ -32,7 +32,21 @@ object Search {
          *
          * Null = enlace normal, se resuelve por el magnet.
          */
-        val fileLink: String? = null
+        val fileLink: String? = null,
+        /**
+         * Índice del fichero DENTRO del torrent que corresponde a este episodio,
+         * tal como lo da el addon (`fileIdx` del protocolo de Stremio).
+         *
+         * Es lo que permite partir un pack de temporada sin tenerlo en la cuenta:
+         * al preguntarle al addon por un episodio concreto, responde con el pack y
+         * con el número de fichero que es ESE episodio. Sin usarlo, el pack se
+         * reproducía por el magnet y Real-Debrid devolvía el primer vídeo, o sea
+         * siempre el capítulo 1.
+         *
+         * Null = no lo dice, o la consulta fue de la serie entera (ahí no hay un
+         * episodio al que apuntar).
+         */
+        val fileIdx: Int? = null
     ) {
         /**
          * Clave para deduplicar. No vale el infoHash a secas: los capítulos
@@ -41,6 +55,13 @@ object Search {
          * lo que se busca).
          */
         val dedupKey: String get() = if (fileLink != null) "$infoHash|$fileLink" else infoHash
+
+        /**
+         * ¿Es un episodio suelto dentro de un torrent con varios? Lo son tanto los
+         * capítulos sacados de un pack de la cuenta como los que el addon sitúa
+         * con su `fileIdx`. No hay que pedir que se elija capítulo: ya se sabe.
+         */
+        val esCapituloDePack: Boolean get() = fileLink != null || fileIdx != null
         /** ¿Lo devolvió este motor? (un enlace puede venir de los dos). */
         fun fromEngine(e: String) = e == Search.ENGINE_ALL || engine.contains(e)
 

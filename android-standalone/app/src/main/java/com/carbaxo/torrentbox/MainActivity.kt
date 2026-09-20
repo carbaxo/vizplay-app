@@ -111,7 +111,7 @@ class MainActivity : AppCompatActivity() {
                         // "Ver" con TV conectada: el reproductor no se abre, se
                         // resuelve el enlace y se manda a la TV desde el momento
                         // en que se pulsa (con su estado en pantalla).
-                        onCastMagnet = { magnet, c -> CastManager.castMagnet(magnet, c) }
+                        onCastMagnet = { magnet, idx, c -> CastManager.castMagnet(magnet, c, idx) }
                     )
                 }
             }
@@ -180,7 +180,7 @@ private enum class Tab(val label: String, val icon: androidx.compose.ui.graphics
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppScreen(onPlayUrl: (String, PlayCtx) -> Unit, onCastMagnet: (String, PlayCtx) -> Unit) {
+fun AppScreen(onPlayUrl: (String, PlayCtx) -> Unit, onCastMagnet: (String, Int?, PlayCtx) -> Unit) {
     var tab by remember { mutableStateOf(Tab.DISCOVER) }
     var detail by remember { mutableStateOf<Tmdb.Title?>(null) }
     var catalogType by remember { mutableStateOf("movie") }
@@ -243,8 +243,8 @@ fun AppScreen(onPlayUrl: (String, PlayCtx) -> Unit, onCastMagnet: (String, PlayC
             else -> onPlayUrl(url, c)
         }
     }
-    fun cast(magnet: String, c: PlayCtx) {
-        onCastMagnet(magnet, c); showCastScreen = true; detail = null
+    fun cast(magnet: String, idx: Int?, c: PlayCtx) {
+        onCastMagnet(magnet, idx, c); showCastScreen = true; detail = null
     }
 
     // Modo infantil: el perfil activo marca kids. Los catálogos se filtran a
@@ -333,7 +333,7 @@ fun AppScreen(onPlayUrl: (String, PlayCtx) -> Unit, onCastMagnet: (String, PlayC
             title = d,
             onBack = { detail = null },
             onPlayUrl = { url, c -> play(url, c) },
-            onCastMagnet = { magnet, c -> cast(magnet, c) },
+            onCastMagnet = { magnet, idx, c -> cast(magnet, idx, c) },
             onOpenDownloads = { tab = Tab.DOWNLOADS; detail = null }
         )
         return
@@ -2497,7 +2497,7 @@ fun SourcesSection(
     /** Contexto de reproducción para una (temporada, episodio); null = el de la ficha. */
     buildCtx: (Int?, Int?) -> PlayCtx,
     onPlayUrl: (String, PlayCtx) -> Unit,
-    onCastMagnet: (String, PlayCtx) -> Unit,
+    onCastMagnet: (String, Int?, PlayCtx) -> Unit,
     onOpenDownloads: () -> Unit
 ) {
     var linksExpanded by remember { mutableStateOf(true) }
@@ -2611,7 +2611,7 @@ fun SourcesSection(
             }
             return
         }
-        RealDebrid.streamMagnet(r.magnet) { url, fname, err, progress ->
+        RealDebrid.streamMagnet(r.magnet, r.fileIdx) { url, fname, err, progress ->
             onMain {
                 val cur = prep ?: return@onMain     // cancelado por el usuario
                 when {
@@ -2829,6 +2829,9 @@ fun SourcesSection(
                         "📦 Pack de temporada · al abrirlo eliges el capítulo",
                         color = WarnAmber, style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold
+                    ) else if (r.fileIdx != null) Text(
+                        "📦 Este capítulo, dentro de un pack · se reproduce directo",
+                        color = Muted, style = MaterialTheme.typography.labelSmall
                     )
                     // Ya está en la cuenta: no hay que esperar a que RD lo baje
                     if (r.infoHash in cached) Text(
@@ -2868,7 +2871,7 @@ fun SourcesSection(
                                         // Con TV conectada va directo a la TV; el
                                         // CastManager muestra el progreso y elige la
                                         // versión con audio compatible.
-                                        onCastMagnet(r.magnet, ctxOf(r))
+                                        onCastMagnet(r.magnet, r.fileIdx, ctxOf(r))
                                     } else {
                                         // Con "emitir con VLC" hace falta el enlace
                                         // resuelto, así que pasa por Real-Debrid igual
@@ -3001,7 +3004,7 @@ fun DetailScreen(
     title: Tmdb.Title,
     onBack: () -> Unit,
     onPlayUrl: (String, PlayCtx) -> Unit,
-    onCastMagnet: (String, PlayCtx) -> Unit,
+    onCastMagnet: (String, Int?, PlayCtx) -> Unit,
     onOpenDownloads: () -> Unit
 ) {
     val ctx = LocalContext.current
@@ -3134,7 +3137,10 @@ fun DetailScreen(
             return l.mapNotNull { r ->
                 when (Search.episodeFit("${r.name} ${r.info}", season, episode)) {
                     Search.Fit.NO -> null
-                    Search.Fit.PACK -> if (r.pack) r else r.copy(pack = true)
+                    // Si el addon ha dicho QUÉ fichero es este episodio, deja de
+                    // ser un cajón: es este episodio, y se reproduce directo.
+                    Search.Fit.PACK -> if (r.fileIdx != null) r.copy(pack = false)
+                        else if (r.pack) r else r.copy(pack = true)
                     Search.Fit.OK -> r
                 }
             }
@@ -3162,8 +3168,10 @@ fun DetailScreen(
                     quality = if (prev.quality != Search.QUALITY_OTHER) prev.quality else r.quality,
                     lang = prev.lang ?: r.lang,
                     info = prev.info.ifBlank { r.info },
-                    // Si alguno de los dos lo dio como pack, lo es
-                    pack = prev.pack || r.pack
+                    // Si alguno de los dos lo dio como pack, lo es...
+                    pack = prev.pack || r.pack,
+                    // ...salvo que uno de ellos sepa qué fichero es el episodio.
+                    fileIdx = prev.fileIdx ?: r.fileIdx
                 )
             }
             // Un pack del que YA se han sacado los capítulos no se enseña además
@@ -3267,7 +3275,31 @@ fun DetailScreen(
             ).joinToString("  ·  "),
             style = MaterialTheme.typography.bodySmall, color = Muted
         )
-        if (dt != null && dt.overview.isNotBlank()) Text(dt.overview, style = MaterialTheme.typography.bodyMedium)
+        if (dt != null && dt.overview.isNotBlank()) {
+            // La sinopsis se come la pantalla, y en la tele deja los enlaces fuera
+            // de cuadro: se enseñan unas líneas y el resto bajo "Ver más". El botón
+            // solo sale si de verdad se ha cortado algo, que lo dice el propio
+            // layout del texto: poner un "Ver más" que no despliega nada confunde
+            // más que no ponerlo.
+            var sinopsisAbierta by remember(dt.overview) { mutableStateOf(false) }
+            var sinopsisCortada by remember(dt.overview) { mutableStateOf(false) }
+            val lineas = if (Tv.isTv) 3 else 4
+            Text(
+                dt.overview,
+                style = if (Tv.isTv) MaterialTheme.typography.bodySmall
+                    else MaterialTheme.typography.bodyMedium,
+                maxLines = if (sinopsisAbierta) Int.MAX_VALUE else lineas,
+                overflow = TextOverflow.Ellipsis,
+                onTextLayout = { if (!sinopsisAbierta) sinopsisCortada = it.hasVisualOverflow }
+            )
+            if (sinopsisCortada || sinopsisAbierta) Text(
+                if (sinopsisAbierta) "Ver menos ▴" else "Ver más ▾",
+                color = Accent, style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier
+                    .tvClickable(RoundedCornerShape(8.dp)) { sinopsisAbierta = !sinopsisAbierta }
+                    .padding(vertical = 4.dp, horizontal = 6.dp)
+            )
+        }
         if (status.isNotBlank()) Text(
             status,
             color = if (statusWarn) WarnAmber else Muted,
@@ -3385,13 +3417,13 @@ fun DetailScreen(
         // se comía la pantalla y obligaba a bajar mucho.
         Row(
             Modifier.fillMaxSize().padding(
-                start = Tv.overscan, end = Tv.overscan, top = 10.dp, bottom = 10.dp
+                start = Tv.overscan, end = Tv.overscan, top = Tv.gap, bottom = Tv.gap
             ),
-            horizontalArrangement = Arrangement.spacedBy(20.dp)
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Column(
-                Modifier.width(210.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                Modifier.width(Tv.posterWidth).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(Tv.gap)
             ) {
                 backButton()
                 AsyncImage(
@@ -3405,11 +3437,11 @@ fun DetailScreen(
             }
             Column(
                 Modifier.weight(1f).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(Tv.gap)
             ) {
                 heading()
                 sourcesBlock()
-                Spacer(Modifier.height(24.dp))
+                Spacer(Modifier.height(16.dp))
             }
         }
     } else {

@@ -291,7 +291,36 @@ object RealDebrid {
     // descarga a sus servidores) no añadan el mismo torrent una y otra vez
     private val torrentIdByMagnet = java.util.concurrent.ConcurrentHashMap<String, String>()
 
-    fun streamMagnet(magnet: String, onDone: (String?, String?, String?, Int?) -> Unit) {
+    /**
+     * Enlace del fichero número [fileIdx] del torrent (el índice que da el addon),
+     * o null si no se puede situar.
+     *
+     * No vale usar el índice tal cual contra `links`: RD numera sus ficheros desde
+     * 1 sobre TODOS los del torrent, mientras que `links` trae solo los
+     * seleccionados (aquí, los vídeos). Hay que contar la POSICIÓN del fichero
+     * entre los seleccionados. Con el índice crudo, un pack con carátulas o
+     * subtítulos por medio devolvía el capítulo equivocado.
+     */
+    private fun linkAt(info: JSONObject, fileIdx: Int?): String? {
+        if (fileIdx == null) return null
+        val files = info.optJSONArray("files") ?: return null
+        val links = info.optJSONArray("links") ?: return null
+        var pos = 0
+        for (i in 0 until files.length()) {
+            val f = files.getJSONObject(i)
+            if (f.optInt("selected", 0) != 1) continue
+            if (f.optInt("id") == fileIdx + 1) return links.optString(pos).takeIf { it.isNotBlank() }
+            pos++
+        }
+        return null
+    }
+
+    /**
+     * @param fileIdx si el enlace es un PACK y el addon ha dicho qué fichero es el
+     *   episodio pedido, su índice. Sin él se cogería el primer vídeo del torrent,
+     *   que en un pack de temporada es siempre el capítulo 1.
+     */
+    fun streamMagnet(magnet: String, fileIdx: Int? = null, onDone: (String?, String?, String?, Int?) -> Unit) {
         io.submit {
             try {
                 val id = torrentIdByMagnet[magnet] ?: run {
@@ -321,7 +350,11 @@ object RealDebrid {
                     return@submit onDone(null, null, null, info.optInt("progress", 0))
                 }
                 val links = info.optJSONArray("links")
-                val link = if (links != null && links.length() > 0) links.getString(0) else return@submit onDone(null, null, "RD no devolvió enlaces.", null)
+                // El fichero que toca; si no se puede situar, el primero (que es lo
+                // que se hacía siempre): mejor el capítulo 1 que un error.
+                val link = linkAt(info, fileIdx)
+                    ?: if (links != null && links.length() > 0) links.getString(0)
+                    else return@submit onDone(null, null, "RD no devolvió enlaces.", null)
                 val un = rd("POST", "/unrestrict/link", mapOf("link" to link))
                 val dl = un.optString("download", "")
                 val fname = un.optString("filename", "").ifBlank { info.optString("filename", "video") }

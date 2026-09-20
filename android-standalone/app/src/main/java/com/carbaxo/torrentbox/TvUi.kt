@@ -59,7 +59,17 @@ object Tv {
     val RingSoft = Color(0x33FFFFFF)
 
     /** Margen de seguridad: las teles recortan los bordes de la imagen. */
-    val overscan = 20.dp
+    val overscan = 14.dp
+
+    /**
+     * Separación entre cosas en la tele. Más apretada que en el móvil a
+     * propósito: en una pantalla de 50" el aire de sobra no se lee como
+     * elegante, se lee como que cabe la mitad de lo que debería.
+     */
+    val gap = 7.dp
+
+    /** Ancho de la carátula en la ficha (columna izquierda). */
+    val posterWidth = 170.dp
 }
 
 /**

@@ -101,10 +101,16 @@ val WordmarkFont = InterDisplay
  * (`letterSpacing` negativo), que es lo que da el aire de Netflix; el cuerpo va
  * normal y bien espaciado para poder leerlo.
  *
- * En la tele todo crece un 15 %: lo que se lee bien a 30 cm no se lee a 3 m.
+ * En la tele la letra va MÁS PEQUEÑA que en el móvil, no más grande.
+ *
+ * Al principio crecía un 15 % con el razonamiento de que a tres metros se lee
+ * peor. En una tele de verdad sale al revés: la pantalla es enorme, Android TV
+ * ya la dibuja a una densidad pensada para verla de lejos, y encima de eso un
+ * 15 % dejaba titulares gigantes y muy pocas cosas por pantalla, con todo el
+ * rato haciendo scroll. Con 0,95 entra bastante más sin que cueste leerlo.
  */
 fun vizTypography(tv: Boolean): Typography {
-    val k = if (tv) 1.15f else 1f
+    val k = if (tv) 0.95f else 1f
     fun sp(v: Float) = (v * k).sp
     return Typography(
         headlineLarge = TextStyle(

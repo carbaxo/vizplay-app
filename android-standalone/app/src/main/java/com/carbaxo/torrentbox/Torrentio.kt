@@ -88,7 +88,7 @@ object Torrentio {
                 for (base in listOf("$HOST/$CONFIG/stream/series/$id.json", "$HOST/stream/series/$id.json")) {
                     val r = runCatching { fetch(base) }.getOrNull()
                     if (!r.isNullOrEmpty()) {
-                        r.forEach { out.putIfAbsent(it.infoHash, it.copy(pack = true)) }
+                        r.forEach { out.putIfAbsent(it.infoHash, it.copy(pack = true, fileIdx = null)) }
                         break
                     }
                 }
@@ -146,7 +146,8 @@ object Torrentio {
                         lang = Lang.detectFromTitle(combined),
                         quality = Search.quality(combined),
                         engine = Search.ENGINE_TORRENTIO,
-                        info = Search.pickInfo(detail, filename)
+                        info = Search.pickInfo(detail, filename),
+                        fileIdx = s.optInt("fileIdx", -1).takeIf { it >= 0 }
                     )
                 )
             }

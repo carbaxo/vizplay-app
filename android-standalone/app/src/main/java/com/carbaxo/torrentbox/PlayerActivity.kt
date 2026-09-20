@@ -378,7 +378,9 @@ class PlayerActivity : AppCompatActivity() {
     /** Resuelve el enlace elegido en Real-Debrid y lo pone en marcha. */
     private fun playEpisode(best: Search.Result, s: Int, e: Int) {
         showToast("Cargando ${best.name.take(40)}…")
-        RealDebrid.streamMagnet(best.magnet) { url, _, err, progress ->
+        // Con el fileIdx: si el siguiente episodio viene de un pack, hay que pedir
+        // SU fichero. Sin esto, "siguiente episodio" volvía al capítulo 1.
+        RealDebrid.streamMagnet(best.magnet, best.fileIdx) { url, _, err, progress ->
             mainH.post {
                 when {
                     url != null -> switchTo(url, s, e)

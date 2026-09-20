@@ -42,7 +42,7 @@ object Peerflix {
             val out = LinkedHashMap<String, Search.Result>()
             for (id in listOfNotNull(imdbId, season?.let { "$imdbId:$it" })) {
                 get("${base()}/stream/series/$id.json")
-                    ?.forEach { out.putIfAbsent(it.infoHash, it.copy(pack = true)) }
+                    ?.forEach { out.putIfAbsent(it.infoHash, it.copy(pack = true, fileIdx = null)) }
             }
             onResult(out.values.toList())
         }

@@ -81,7 +81,10 @@ object Addon {
                     lang = Lang.detectFromTitle(combined),
                     quality = Search.quality(combined),
                     engine = engine,
-                    info = Search.pickInfo(detail, filename)
+                    info = Search.pickInfo(detail, filename),
+                    // -1 = no lo manda. Es el número de fichero dentro del torrent
+                    // que corresponde al episodio pedido.
+                    fileIdx = s.optInt("fileIdx", -1).takeIf { it >= 0 }
                 )
             )
         }

@@ -144,14 +144,14 @@ object CastManager {
      * Emite un magnet: lo resuelve en Real-Debrid y envía a la TV la versión
      * convertida (con audio AAC) en cuanto esté.
      */
-    fun castMagnet(magnet: String, ctx: PlayCtx) {
+    fun castMagnet(magnet: String, ctx: PlayCtx, fileIdx: Int? = null) {
         begin(ctx)
         if (!RealDebrid.configured) {
             status = "Configura Real-Debrid en Ajustes para emitir a la TV"
             return
         }
         status = "⚡ Preparando en Real-Debrid…"
-        resolveRd(magnet, 0)
+        resolveRd(magnet, fileIdx, 0)
     }
 
     /** Emite una URL ya resuelta de Real-Debrid (tiene que ser http/https). */
@@ -200,14 +200,14 @@ object CastManager {
     // ------------------------------------------------------------------
     // Real-Debrid -> URL
     // ------------------------------------------------------------------
-    private fun resolveRd(magnet: String, attempt: Int) {
-        RealDebrid.streamMagnet(magnet) { url, _, err, progress ->
+    private fun resolveRd(magnet: String, fileIdx: Int?, attempt: Int) {
+        RealDebrid.streamMagnet(magnet, fileIdx) { url, _, err, progress ->
             mainH.post {
                 when {
                     url != null -> buildLadder(url)
                     progress != null && attempt < MAX_RD_TRIES -> {
                         status = "⚡ Real-Debrid lo está preparando… ${progress}%"
-                        mainH.postDelayed({ resolveRd(magnet, attempt + 1) }, 4000)
+                        mainH.postDelayed({ resolveRd(magnet, fileIdx, attempt + 1) }, 4000)
                     }
                     progress != null -> status =
                         "Real-Debrid sigue preparándolo (${progress}%). Inténtalo en un par de minutos."

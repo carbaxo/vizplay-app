@@ -47,7 +47,7 @@ object ExtraAddon {
             val out = LinkedHashMap<String, Search.Result>()
             for (id in listOfNotNull(imdbId, season?.let { "$imdbId:$it" })) {
                 Addon.get("${base()}/stream/series/$id.json", Search.ENGINE_EXTRA)
-                    ?.forEach { out.putIfAbsent(it.infoHash, it.copy(pack = true)) }
+                    ?.forEach { out.putIfAbsent(it.infoHash, it.copy(pack = true, fileIdx = null)) }
             }
             onResult(out.values.toList())
         }
