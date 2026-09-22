@@ -99,13 +99,39 @@ object WatchStore {
         list.clear(); list.addAll(parse(arr)); persistLocal()
     }
 
+    /**
+     * Cada subida a la nube manda la lista ENTERA. En disco se guarda siempre
+     * (es barato y local), pero a Firestore no se va más de una vez cada 30 s:
+     * con el autoguardado del reproductor, si no, serían seis escrituras por
+     * minuto durante toda la película, cada una con todo el historial dentro.
+     *
+     * Lo que SÍ sube en el momento es el "visto": es el cambio que importa que
+     * llegue al resto de aparatos, y pasa una vez por episodio, no cada 10 s.
+     */
+    private var ultimaNube = 0L
+    private const val NUBE_MIN_MS = 30_000L
+
+    private fun subirNube(forzar: Boolean) {
+        val ahora = System.currentTimeMillis()
+        if (!forzar && ahora - ultimaNube < NUBE_MIN_MS) return
+        ultimaNube = ahora
+        // no-op si no hay sesión o perfil activo
+        runCatching { Sync.saveProgressCloud(toMaps()) }
+    }
+
+    /**
+     * Sube ya lo que haya pendiente. Se llama al salir del reproductor: si no, la
+     * última posición podía quedarse esperando a que pasaran los 30 s que ya no
+     * iban a pasar.
+     */
+    fun flush() = subirNube(true)
+
     private fun upsert(p: Prog) {
         val i = list.indexOfFirst { it.key == p.key }
         if (i >= 0) list.removeAt(i)
         list.add(0, p)
         persistLocal()
-        // Empuja a la nube si hay perfil activo (no-op si no hay sesión)
-        runCatching { Sync.saveProgressCloud(toMaps()) }
+        subirNube(forzar = p.watched)
     }
 
     /** Registra progreso de reproducción. */
@@ -116,6 +142,36 @@ object WatchStore {
         val key = if (isSeries) "series:$tmdbId:$season:${episode ?: 1}" else "movie:$tmdbId"
         val watched = duration > 0 && position / duration > 0.9
         upsert(Prog(key, titleId, tmdbId, if (isSeries) "series" else "movie", season, episode, name, poster, position, duration, watched, iso()))
+    }
+
+    /**
+     * Marca algo como VISTO sin depender de la duración.
+     *
+     * [record] decide el "visto" con position/duration > 0.9, y eso falla justo
+     * cuando más importa: al terminar un vídeo, muchos reproductores dejan la
+     * posición en 0 o no llegan a saber la duración de un stream, así que el
+     * episodio que acabas de terminar entero se quedaba sin marcar. Cuando el
+     * reproductor dice que ha llegado al final no hay nada que deducir: está
+     * visto, y se apunta así.
+     *
+     * Se conserva la duración que ya hubiera guardada, que es la buena para la
+     * barra de progreso.
+     */
+    fun markWatched(tmdbId: Int, type: String, season: Int?, episode: Int?, name: String, poster: String?) {
+        if (tmdbId <= 0) return
+        val isSeries = type == "series" && season != null
+        val titleId = "${if (isSeries) "series" else "movie"}:$tmdbId"
+        val key = if (isSeries) "series:$tmdbId:$season:${episode ?: 1}" else "movie:$tmdbId"
+        val prev = progressFor(key)
+        val dur = prev?.duration ?: 0.0
+        upsert(
+            Prog(
+                key, titleId, tmdbId, if (isSeries) "series" else "movie", season, episode,
+                name.ifBlank { prev?.name ?: "" }, poster ?: prev?.poster,
+                position = if (dur > 0) dur else (prev?.position ?: 0.0),
+                duration = dur, watched = true, updatedAt = iso()
+            )
+        )
     }
 
     fun isWatchedTitle(type: String, tmdbId: Int): Boolean {

@@ -173,9 +173,13 @@ class PlayerActivity : AppCompatActivity() {
             p.playWhenReady = true
             p.addListener(object : Player.Listener {
                 override fun onPlaybackStateChanged(state: Int) {
-                    if (state == Player.STATE_ENDED && mediaType == "series" && episode > 0) {
-                        nextBtn.visibility = View.VISIBLE
-                    }
+                    if (state != Player.STATE_ENDED) return
+                    // Se marca AQUI. saveProgress() solo corre al salir del
+                    // reproductor, y para entonces un episodio terminado o bien ha
+                    // dejado la posicion en 0, o bien ya ha sido reemplazado por el
+                    // siguiente: el que acababas de ver entero no se marcaba nunca.
+                    marcarVisto()
+                    if (mediaType == "series" && episode > 0) nextBtn.visibility = View.VISIBLE
                 }
             })
         }
@@ -411,6 +415,9 @@ class PlayerActivity : AppCompatActivity() {
 
     /** Cambia el reproductor al nuevo episodio, actualizando el contexto de progreso. */
     private fun switchTo(url: String, s: Int, e: Int) {
+        // Lo que se estaba viendo se guarda ANTES de cambiar los campos: si no, el
+        // progreso del episodio que dejas se apuntaria en el que empieza.
+        saveProgress()
         season = s; episode = e
         currentUrl = url
         if (isCasting()) {
@@ -432,6 +439,34 @@ class PlayerActivity : AppCompatActivity() {
     }
 
     // ------------------- Progreso -------------------
+
+    /**
+     * Da por VISTO lo que se esta reproduciendo. Se llama al llegar al final.
+     */
+    private fun marcarVisto() {
+        if (tmdbId <= 0) return
+        WatchStore.markWatched(
+            tmdbId = tmdbId, type = mediaType,
+            season = season.takeIf { it > 0 }, episode = episode.takeIf { it > 0 },
+            name = titleName, poster = poster
+        )
+    }
+
+    /**
+     * Autoguardado cada 10 s mientras se reproduce.
+     *
+     * Hasta ahora el progreso solo se guardaba en onStop/onDestroy, asi que
+     * cerrar la app de un tiron -o que el sistema la matara- se llevaba por
+     * delante todo lo visto en esa sesion. La emision a la TV ya lo hacia asi;
+     * el reproductor de la app, no.
+     */
+    private val autoguardado = object : Runnable {
+        override fun run() {
+            saveProgress()
+            mainH.postDelayed(this, 10_000)
+        }
+    }
+
     private fun saveProgress() {
         // Si estamos emitiendo, la posición buena es la de la TV
         val p = (if (isCasting()) CastManager.player else player) ?: return
@@ -451,15 +486,25 @@ class PlayerActivity : AppCompatActivity() {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        mainH.removeCallbacks(autoguardado)
+        mainH.postDelayed(autoguardado, 10_000)
+    }
+
     override fun onStop() {
         super.onStop()
+        mainH.removeCallbacks(autoguardado)
         saveProgress()
+        WatchStore.flush()
         player?.playWhenReady = false
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        mainH.removeCallbacks(autoguardado)
         saveProgress()
+        WatchStore.flush()
         // La sesión de Cast es global (CastManager): no se libera aquí, solo se
         // deja de escuchar para no avisar a una pantalla ya destruida.
         CastManager.onSessionChanged = null

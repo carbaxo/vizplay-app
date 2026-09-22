@@ -3376,13 +3376,52 @@ fun DetailScreen(
                         colors = CardDefaults.cardColors(containerColor = Surface1)
                     ) {
                         Column(Modifier.padding(10.dp)) {
-                            val seen = WatchStore.isWatchedEpisode(title.tmdbId, sn, ep.episode)
-                            Text(
-                                (if (seen) "✓ " else "") + "${ep.episode}. ${ep.name}" + (if (open) "  ▾" else "  ▸"),
-                                style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                                color = if (seen) OkGreen else MaterialTheme.colorScheme.onSurface
+                            // Estado del episodio: visto, empezado o sin tocar. El
+                            // "✓" pegado al texto se perdía entre el número y el
+                            // título; ahora va un icono en COLUMNA, siempre en el
+                            // mismo sitio, para poder recorrer la temporada de
+                            // arriba abajo y ver de un vistazo por dónde vas.
+                            val prog = WatchStore.progressFor("series:${title.tmdbId}:$sn:${ep.episode}")
+                            val seen = prog?.watched == true
+                            val avance = if (!seen && prog != null && prog.duration > 0)
+                                (prog.position / prog.duration).coerceIn(0.0, 1.0).toFloat() else 0f
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    if (seen) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                                    contentDescription = if (seen) "Visto" else "Sin ver",
+                                    tint = if (seen) OkGreen else Muted,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "${ep.episode}. ${ep.name}" + (if (open) "  ▾" else "  ▸"),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                    // Visto = apagado, como en Netflix: lo que
+                                    // destaca es lo que te queda por ver.
+                                    color = if (seen) Muted else MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (seen) Text(
+                                    "Visto", color = OkGreen,
+                                    style = MaterialTheme.typography.labelSmall
+                                ) else if (avance > 0f) Text(
+                                    "${(avance * 100).toInt()}%", color = Accent,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                            // Empezado y sin acabar: barra de por dónde vas
+                            if (avance > 0f) LinearProgressIndicator(
+                                progress = { avance },
+                                color = Accent,
+                                trackColor = Surface2,
+                                modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(3.dp)
                             )
-                            if (ep.overview.isNotBlank()) Text(ep.overview, style = MaterialTheme.typography.labelSmall, color = Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            if (ep.overview.isNotBlank()) Text(
+                                ep.overview, style = MaterialTheme.typography.labelSmall,
+                                color = Muted, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
                         }
                     }
                     // Enlaces JUSTO debajo del episodio elegido
