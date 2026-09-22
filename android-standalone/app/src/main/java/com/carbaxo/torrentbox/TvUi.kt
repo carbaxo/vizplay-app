@@ -9,7 +9,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -108,6 +110,25 @@ fun Modifier.tvClickable(
 ): Modifier = this
     .tvFocusRing(shape, scale, focusRequester)
     .clickable(onClick = onClick)
+
+/**
+ * Como [tvClickable] pero con PULSACIÓN LARGA.
+ *
+ * Con el mando de la tele funciona igual que con el dedo: mantener pulsado el
+ * botón central cuenta como pulsación larga, así que no hace falta una pantalla
+ * aparte para las acciones secundarias.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun Modifier.tvClickableLong(
+    shape: Shape = RoundedCornerShape(10.dp),
+    scale: Float = 1.06f,
+    focusRequester: FocusRequester? = null,
+    onLongClick: () -> Unit,
+    onClick: () -> Unit
+): Modifier = this
+    .tvFocusRing(shape, scale, focusRequester)
+    .combinedClickable(onClick = onClick, onLongClick = onLongClick)
 
 /**
  * Igual que [tvFocusRing] pero además tiñe el fondo al enfocar. Para las filas

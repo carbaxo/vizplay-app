@@ -161,7 +161,7 @@ object WatchStore {
         if (tmdbId <= 0) return
         val isSeries = type == "series" && season != null
         val titleId = "${if (isSeries) "series" else "movie"}:$tmdbId"
-        val key = if (isSeries) "series:$tmdbId:$season:${episode ?: 1}" else "movie:$tmdbId"
+        val key = keyOf(tmdbId, type, season, episode)
         val prev = progressFor(key)
         val dur = prev?.duration ?: 0.0
         upsert(
@@ -173,6 +173,28 @@ object WatchStore {
             )
         )
     }
+
+    /**
+     * Olvida lo guardado de un episodio o una película: vuelve a estar "sin ver".
+     *
+     * Es la otra mitad de marcar a mano: si se puede marcar, tiene que poder
+     * desmarcarse, porque lo normal es equivocarse al pulsar.
+     */
+    fun forget(tmdbId: Int, type: String, season: Int?, episode: Int?) {
+        val i = list.indexOfFirst { it.key == keyOf(tmdbId, type, season, episode) }
+        if (i < 0) return
+        list.removeAt(i)
+        persistLocal()
+        subirNube(forzar = true)
+    }
+
+    /** ¿Está marcado como visto? Vale para una película y para un episodio. */
+    fun isWatched(tmdbId: Int, type: String, season: Int?, episode: Int?): Boolean =
+        list.any { it.key == keyOf(tmdbId, type, season, episode) && it.watched }
+
+    private fun keyOf(tmdbId: Int, type: String, season: Int?, episode: Int?): String =
+        if (type == "series" && season != null) "series:$tmdbId:$season:${episode ?: 1}"
+        else "movie:$tmdbId"
 
     fun isWatchedTitle(type: String, tmdbId: Int): Boolean {
         val tid = "${if (type == "series") "series" else "movie"}:$tmdbId"

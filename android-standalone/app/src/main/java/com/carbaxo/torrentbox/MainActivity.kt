@@ -15,6 +15,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -170,6 +171,34 @@ data class PlayCtx(
     fun withSource(r: Search.Result) = copy(engine = r.engine, quality = r.quality, lang = r.lang)
 }
 
+/**
+ * Lo que recuerda cada pestaña mientras la app vive.
+ *
+ * Hace falta porque la ficha de detalle se pinta con un `return`: la pantalla de
+ * la pestaña SALE de la composición y se lleva con ella todo su `remember`. Al
+ * volver con "atrás", la búsqueda aparecía vacía y Descubrir volvía a pedir los
+ * catálogos, así que no parecía que volvieras a la pantalla anterior sino al
+ * principio de la app. Guardándolo aquí, "atrás" la devuelve tal y como estaba,
+ * incluido por dónde ibas en la lista.
+ */
+class BuscarState {
+    var query by mutableStateOf("")
+    var type by mutableStateOf("movie")
+    var results by mutableStateOf<List<Tmdb.Title>>(emptyList())
+    var status by mutableStateOf("")
+    val lista = LazyListState()
+}
+
+class DescubrirState {
+    var rows by mutableStateOf<List<Tmdb.Row>>(emptyList())
+    var status by mutableStateOf(if (Tmdb.hasKey) "Cargando catálogos…" else "")
+    var browse by mutableStateOf<Pair<String, String>?>(null)
+    val recs = mutableStateListOf<Tmdb.Title>()
+    /** (tipo, infantil) cuyos catálogos ya están cargados: no se vuelven a pedir. */
+    var cargadoPara: Pair<String, Boolean>? = null
+    val lista = LazyListState()
+}
+
 private enum class Tab(val label: String, val icon: androidx.compose.ui.graphics.vector.ImageVector) {
     DISCOVER("Descubrir", Icons.Filled.Explore),
     SEARCH("Buscar", Icons.Filled.Search),
@@ -186,6 +215,9 @@ fun AppScreen(onPlayUrl: (String, PlayCtx) -> Unit, onCastMagnet: (String, Int?,
     var catalogType by remember { mutableStateOf("movie") }
     var showCastScreen by remember { mutableStateOf(false) }
     var showProfiles by remember { mutableStateOf(false) }
+    // Sobreviven a abrir una ficha: ver [BuscarState]
+    val buscar = remember { BuscarState() }
+    val descubrir = remember { DescubrirState() }
     // "Preguntar cada vez" con qué reproductor abrir, y errores al lanzarlo
     var askPlayer by remember { mutableStateOf<Pair<String, PlayCtx>?>(null) }
     // (título, mensaje, ¿ofrecer instalar VLC?)
@@ -399,10 +431,10 @@ fun AppScreen(onPlayUrl: (String, PlayCtx) -> Unit, onCastMagnet: (String, Int?,
 
     val content: @Composable () -> Unit = {
         when (tab) {
-            Tab.DISCOVER -> DiscoverScreen(catalogType, { catalogType = it }, kids = kids, onOpen = { detail = it })
+            Tab.DISCOVER -> DiscoverScreen(descubrir, catalogType, { catalogType = it }, kids = kids, onOpen = { detail = it })
             // Buscar también con perfil infantil: antes llevaba al catálogo
             // filtrado, y así no había forma de pedir una serie por su nombre.
-            Tab.SEARCH -> SearchScreen(onOpen = { detail = it })
+            Tab.SEARCH -> SearchScreen(buscar, onOpen = { detail = it })
             Tab.LIVE -> LiveScreen(kids = kids) { ch ->
                 // Los de YouTube no van por ExoPlayer: llevan su reproductor
                 // incrustado, que es lo que permite verlos sin salir de la app.
@@ -837,23 +869,22 @@ fun ContinueCard(p: WatchStore.Prog, onClick: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DiscoverScreen(type: String, onType: (String) -> Unit, kids: Boolean = false, onOpen: (Tmdb.Title) -> Unit) {
-    var rows by remember { mutableStateOf<List<Tmdb.Row>>(emptyList()) }
-    var status by remember { mutableStateOf(if (Tmdb.hasKey) "Cargando catálogos…" else "") }
+fun DiscoverScreen(st: DescubrirState, type: String, onType: (String) -> Unit, kids: Boolean = false, onOpen: (Tmdb.Title) -> Unit) {
+    var rows by st::rows
+    var status by st::status
     // Explorar una plataforma en modo rejilla paginada ("Ver más")
-    var browse by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var browse by st::browse
     // Recomendados según lo visto + favoritos
-    val recs = remember { mutableStateListOf<Tmdb.Title>() }
+    val recs = st.recs
     // Las recomendaciones son del TIPO elegido arriba: con el filtro en Series no
     // se recomiendan películas. Depende de `type`, así que se recalculan al
     // cambiar de pestaña.
     LaunchedEffect(type, WatchStore.list.size, Sync.favorites.size) {
-        recs.clear()
-        if (!Tmdb.hasKey) return@LaunchedEffect
+        if (!Tmdb.hasKey) { recs.clear(); return@LaunchedEffect }
         val seeds = (
             WatchStore.seeds(type) + Sync.favorites.filter { it.type == type }.map { it.tmdbId to it.type }
             ).distinctBy { it.first }.take(6)
-        if (seeds.isEmpty()) return@LaunchedEffect
+        if (seeds.isEmpty()) { recs.clear(); return@LaunchedEffect }
         Tmdb.recommendations(seeds) { list ->
             // Red de seguridad: que no se cuele nada del otro tipo
             onMain { recs.clear(); recs.addAll(list.filter { it.type == type }) }
@@ -862,9 +893,17 @@ fun DiscoverScreen(type: String, onType: (String) -> Unit, kids: Boolean = false
 
     LaunchedEffect(type, kids) {
         if (!Tmdb.hasKey) { status = "" ; return@LaunchedEffect }
+        // Al volver de una ficha esta pantalla se vuelve a componer. Si los
+        // catálogos de este tipo ya están, no se piden otra vez: si no, cada
+        // "atrás" enseñaba "Cargando catálogos…" y perdías el sitio.
+        if (st.cargadoPara == (type to kids) && rows.isNotEmpty()) return@LaunchedEffect
         status = "Cargando catálogos…"; rows = emptyList()
         Tmdb.catalogs(type, kids) { list, err ->
-            onMain { rows = list ?: emptyList(); status = if (list == null) (err ?: "Error") else "" }
+            onMain {
+                rows = list ?: emptyList()
+                status = if (list == null) (err ?: "Error") else ""
+                if (list != null) st.cargadoPara = type to kids
+            }
         }
     }
 
@@ -880,6 +919,7 @@ fun DiscoverScreen(type: String, onType: (String) -> Unit, kids: Boolean = false
     val ctx = LocalContext.current
     LazyColumn(
         Modifier.fillMaxSize().padding(horizontal = if (Tv.isTv) 4.dp else 12.dp),
+        state = st.lista,
         contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)
     ) {
         // Aviso de nueva versión (auto-actualización)
@@ -1074,11 +1114,11 @@ fun BrowseScreen(provider: String, name: String, type: String, kids: Boolean = f
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SearchScreen(onOpen: (Tmdb.Title) -> Unit) {
-    var query by remember { mutableStateOf("") }
-    var type by remember { mutableStateOf("movie") }
-    var results by remember { mutableStateOf<List<Tmdb.Title>>(emptyList()) }
-    var status by remember { mutableStateOf("") }
+fun SearchScreen(st: BuscarState, onOpen: (Tmdb.Title) -> Unit) {
+    var query by st::query
+    var type by st::type
+    var results by st::results
+    var status by st::status
 
     fun go() {
         if (query.isBlank() || !Tmdb.hasKey) return
@@ -1088,7 +1128,11 @@ fun SearchScreen(onOpen: (Tmdb.Title) -> Unit) {
         }
     }
 
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp), contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)) {
+    LazyColumn(
+        Modifier.fillMaxSize().padding(horizontal = 12.dp),
+        state = st.lista,
+        contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp)
+    ) {
         item {
             Text("Buscar", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(10.dp))
@@ -3320,6 +3364,25 @@ fun DetailScreen(
                 ) { Text("🎬 Tráiler") }
             }
         }
+        // Marcar una PELÍCULA como vista a mano. En una película no hay lista de
+        // episodios donde mantener pulsado, así que va como botón: es además lo
+        // que se busca cuando ya la has visto fuera de la app y no quieres que te
+        // la sigan recomendando.
+        val vistaBtn: @Composable () -> Unit = {
+            if (title.type != "series") {
+                val vista = WatchStore.isWatched(title.tmdbId, "movie", null, null)
+                OutlinedButton(
+                    onClick = {
+                        if (vista) WatchStore.forget(title.tmdbId, "movie", null, null)
+                        else WatchStore.markWatched(
+                            title.tmdbId, "movie", null, null, title.title, title.poster
+                        )
+                    },
+                    modifier = (if (stacked) Modifier.fillMaxWidth() else Modifier)
+                        .tvFocusRing(NfShape)
+                ) { Text(if (vista) "✅ Vista" else "Marcar como vista") }
+            }
+        }
         val favBtn: @Composable () -> Unit = {
             if (Sync.enabled && Sync.email != null) {
                 val fid = "tmdb:${title.tmdbId}"
@@ -3333,9 +3396,9 @@ fun DetailScreen(
             }
         }
         if (stacked) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { trailerBtn(); favBtn() }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { trailerBtn(); vistaBtn(); favBtn() }
         } else {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { trailerBtn(); favBtn() }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { trailerBtn(); vistaBtn(); favBtn() }
         }
     }
 
@@ -3358,12 +3421,30 @@ fun DetailScreen(
                 color = Muted, style = MaterialTheme.typography.labelSmall
             )
             selSeason?.let { sn ->
+                // Una pulsación larga no se ve: hay que decirlo, o no existe.
+                if (episodes.isNotEmpty()) Text(
+                    "Mantén pulsado un episodio para marcarlo como visto (o quitarlo).",
+                    color = Muted, style = MaterialTheme.typography.labelSmall
+                )
                 // Sin "temporada completa": Peerflix y Torrentio dan enlaces
                 // por episodio (los packs de temporada salen entre ellos).
                 episodes.forEach { ep ->
                     val open = expandedEpisode == ep.episode
                     Card(
-                        Modifier.fillMaxWidth().tvClickable(RoundedCornerShape(12.dp), scale = 1.02f) {
+                        Modifier.fillMaxWidth().tvClickableLong(
+                            RoundedCornerShape(12.dp), scale = 1.02f,
+                            // Marcar a mano lo que has visto por tu cuenta (en otra
+                            // app, en la tele de casa, hace años). Mantener pulsado
+                            // funciona igual con el dedo y con el mando.
+                            onLongClick = {
+                                if (WatchStore.isWatched(title.tmdbId, "series", sn, ep.episode))
+                                    WatchStore.forget(title.tmdbId, "series", sn, ep.episode)
+                                else WatchStore.markWatched(
+                                    title.tmdbId, "series", sn, ep.episode,
+                                    "${title.title} T${sn}E${ep.episode}", title.poster
+                                )
+                            }
+                        ) {
                             if (open) {
                                 // Volver a tocarlo lo cierra: así se sigue
                                 // navegando la temporada sin estorbos.
