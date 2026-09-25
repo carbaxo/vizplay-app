@@ -1,0 +1,32 @@
+module VizPlay
+singleton Tema 1.0 Tema.qml
+singleton App 1.0 App.qml
+Anillo 1.0 Anillo.qml
+Barra 1.0 Barra.qml
+BarraScroll 1.0 BarraScroll.qml
+Boton 1.0 Boton.qml
+BotonRedondo 1.0 BotonRedondo.qml
+Campo 1.0 Campo.qml
+Chip 1.0 Chip.qml
+Dialogo 1.0 Dialogo.qml
+Etiqueta 1.0 Etiqueta.qml
+FilaCarteles 1.0 FilaCarteles.qml
+Fuentes 1.0 Fuentes.qml
+Icono 1.0 Icono.qml
+Imagen 1.0 Imagen.qml
+Interruptor 1.0 Interruptor.qml
+Main 1.0 Main.qml
+Pagina 1.0 Pagina.qml
+PaginaAjustes 1.0 PaginaAjustes.qml
+PaginaBuscar 1.0 PaginaBuscar.qml
+PaginaDescargas 1.0 PaginaDescargas.qml
+PaginaDescubrir 1.0 PaginaDescubrir.qml
+PaginaExplorar 1.0 PaginaExplorar.qml
+PaginaFicha 1.0 PaginaFicha.qml
+Poster 1.0 Poster.qml
+Reproductor 1.0 Reproductor.qml
+Segmentado 1.0 Segmentado.qml
+SelectorPerfil 1.0 SelectorPerfil.qml
+Tarjeta 1.0 Tarjeta.qml
+TarjetaDescarga 1.0 TarjetaDescarga.qml
+Wordmark 1.0 Wordmark.qml
