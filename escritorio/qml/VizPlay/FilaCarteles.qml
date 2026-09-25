@@ -44,19 +44,26 @@ ColumnLayout {
                 property var dato: index < fila.items.length ? fila.items[index] : null
                 onActiveFocusChanged: if (activeFocus && item) item.forceActiveFocus()
             }
-            WheelHandler {
-                // Solo el desplazamiento HORIZONTAL (panel táctil, Mayús+rueda)
-                acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-                onWheel: function (ev) {
-                    const dx = ev.angleDelta.x !== 0 ? ev.angleDelta.x
-                             : ((ev.modifiers & Qt.ShiftModifier) ? ev.angleDelta.y : 0)
-                    if (dx === 0) { ev.accepted = false; return }
-                    lista.desplazar(-dx)
-                }
-            }
             function desplazar(d) {
                 const max = Math.max(0, contentWidth - width + leftMargin + rightMargin)
                 contentX = Math.max(-leftMargin, Math.min(max - leftMargin, contentX + d))
+            }
+        }
+
+        // La rueda: lo HORIZONTAL (panel táctil, Mayús+rueda) mueve la fila y lo
+        // vertical sigue hasta la página. Con un WheelHandler no se podía: se
+        // quedaba con todos los giros aunque se marcaran como no aceptados, y la
+        // página dejaba de bajar en cuanto el ratón estaba encima de una fila.
+        // Un MouseArea sin botones solo atiende a la rueda: clics y paso del
+        // ratón llegan a las carátulas como siempre.
+        MouseArea {
+            anchors.fill: lista
+            acceptedButtons: Qt.NoButton
+            onWheel: function (ev) {
+                const dx = ev.angleDelta.x !== 0 ? ev.angleDelta.x
+                         : ((ev.modifiers & Qt.ShiftModifier) ? ev.angleDelta.y : 0)
+                if (dx === 0) { ev.accepted = false; return }
+                lista.desplazar(-dx)
             }
         }
 
