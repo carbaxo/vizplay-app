@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VizPlay · Entrar con Google</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #141414;
+           color: #fff; font: 16px/1.5 "Inter", "Segoe UI", system-ui, sans-serif; }
+    main { width: min(420px, calc(100% - 32px)); text-align: center; }
+    .marca { font-weight: 900; font-size: 34px; letter-spacing: -1px; margin-bottom: 8px; }
+    .marca em { color: #c41e3a; font-style: normal; }
+    p { color: #b3b3b3; margin: 0 0 28px; }
+    button { width: 100%; padding: 14px 18px; border: 0; border-radius: 4px; background: #fff; color: #000;
+             font: 700 16px "Inter", "Segoe UI", sans-serif; cursor: pointer; }
+    button:hover { background: #e6e6e6; }
+    button:disabled { opacity: .6; cursor: default; }
+    #estado { margin-top: 20px; min-height: 1.5em; color: #b3b3b3; }
+    #estado.ok { color: #34d399; }
+    #estado.error { color: #fbbf24; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="marca">VIZ<em>PLAY</em></div>
+  <p>Entra con tu cuenta de Google para tener tus perfiles, tu lista y lo que estás viendo también en el PC.</p>
+  <button id="entrar">Continuar con Google</button>
+  <div id="estado"></div>
+</main>
+<script src="vendor/firebase-app-compat.js"></script>
+<script src="vendor/firebase-auth-compat.js"></script>
+<script>
+  // La página la sirve la propia app de escritorio en localhost; al terminar le
+  // devuelve la sesión y ya no hace falta el navegador para nada.
+  const CONFIG = __CONFIG__
+  const NONCE = "__NONCE__"
+  const estado = document.getElementById('estado')
+  const boton = document.getElementById('entrar')
+  firebase.initializeApp(CONFIG)
+  const auth = firebase.auth()
+  // Que el navegador no se quede con la sesión: es de la app, no suya
+  auth.setPersistence(firebase.auth.Auth.Persistence.NONE)
+
+  async function avisar (datos) {
+    await fetch('/hecho', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign({ nonce: NONCE }, datos)) })
+  }
+
+  boton.addEventListener('click', async () => {
+    boton.disabled = true
+    estado.className = ''
+    estado.textContent = 'Abriendo Google…'
+    try {
+      const provider = new firebase.auth.GoogleAuthProvider()
+      provider.setCustomParameters({ prompt: 'select_account' })
+      const cred = await auth.signInWithPopup(provider)
+      const idToken = await cred.user.getIdToken()
+      await avisar({ idToken, refreshToken: cred.user.refreshToken, uid: cred.user.uid, email: cred.user.email })
+      estado.className = 'ok'
+      estado.textContent = '✓ Listo. Ya puedes cerrar esta pestaña y volver a VizPlay.'
+      boton.style.display = 'none'
+      setTimeout(() => window.close(), 1500)
+    } catch (err) {
+      boton.disabled = false
+      if (err && (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request')) {
+        estado.textContent = ''
+        return
+      }
+      const msg = err && err.code === 'auth/unauthorized-domain'
+        ? 'Firebase no tiene autorizado «localhost». Añádelo en Firebase Console → Authentication → Settings → Authorized domains.'
+        : (err && err.message) || 'No se pudo entrar con Google.'
+      estado.className = 'error'
+      estado.textContent = msg
+      if (err && err.code === 'auth/unauthorized-domain') await avisar({ error: msg })
+    }
+  })
+</script>
+</body>
+</html>

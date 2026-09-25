@@ -1,6 +1,6 @@
 # 🎬 Torrent Client Viewer — modo Real-Debrid
 
-App web multiusuario para **buscar películas y series y verlas por streaming directo**, con catálogos de plataformas y perfiles independientes. Hay además una **app Android/Android TV** nativa en [`android-standalone/`](./android-standalone).
+App web multiusuario para **buscar películas y series y verlas por streaming directo**, con catálogos de plataformas y perfiles independientes. Hay además una **app Android/Android TV** nativa en [`android-standalone/`](./android-standalone). Y una **app de escritorio para Windows** nativa (PySide6 + QML, con el aspecto de la de Android TV) en [`escritorio/`](./escritorio): se arranca con `arrancar-escritorio.bat`.
 
 > ⚡ **Requiere una cuenta de Real-Debrid.** El proyecto **no lleva motor BitTorrent**: no descarga por torrent ni se conecta a ningún peer. Lo único que hace con un magnet es entregárselo a Real-Debrid, que lo resuelve en sus servidores y devuelve una URL HTTPS normal que el navegador reproduce **directamente desde el CDN de RD** — el vídeo no pasa por tu servidor.
 
@@ -64,6 +64,8 @@ public/
 test/run.mjs         Tests sin dependencias externas
 Dockerfile           Imagen Node lista para desplegar
 android-standalone/  App Android / Android TV nativa (ExoPlayer + Chromecast)
+escritorio/          App de escritorio para Windows (PySide6 + QML, reproductor FFmpeg)
+arrancar-escritorio.bat  Lanzador de la app de escritorio (crea el entorno la primera vez)
 ```
 
 El **progreso se indexa por título** (`movie:<tmdb>` / `series:<tmdb>:<temporada>:<episodio>`), el mismo esquema que usa `WatchStore.kt` de la app Android, para que "continuar viendo" se sincronice entre la web y el móvil.

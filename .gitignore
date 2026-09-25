@@ -20,3 +20,9 @@ android-standalone/.idea/
 # firmar un APK que Android instalará como actualización de la app.
 *.keystore
 *.jks
+
+# App de escritorio (PySide6)
+.venv/
+__pycache__/
+*.pyc
+escritorio/tmdb_key.txt
